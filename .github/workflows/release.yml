@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: resolve
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
@@ -74,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [resolve, quality]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
@@ -128,7 +128,7 @@ jobs:
             -e AppDir/usr/bin/candilog \
             --output appimage
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ubuntu-latest
           path: |
@@ -143,7 +143,7 @@ jobs:
       image: fedora:latest
     needs: [resolve, quality]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
@@ -172,7 +172,7 @@ jobs:
       - name: Package .rpm
         run: cargo generate-rpm --auto-req auto
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: fedora-latest
           path: target/generate-rpm/*.rpm
@@ -183,7 +183,7 @@ jobs:
     runs-on: macos-latest
     needs: [resolve, quality]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
@@ -238,7 +238,7 @@ jobs:
       - name: Package .dmg
         run: hdiutil create -volname Candilog -srcfolder Candilog.app -ov -format UDZO candilog-macos-latest.dmg
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: macos-latest
           path: candilog-macos-latest.dmg
@@ -249,7 +249,7 @@ jobs:
     runs-on: windows-latest
     needs: [resolve, quality]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
@@ -259,7 +259,7 @@ jobs:
       - name: Build release
         run: cargo build --locked --release --all-features
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: windows-latest
           path: target/release/candilog.exe
@@ -271,14 +271,14 @@ jobs:
     needs: [resolve, quality, build-ubuntu, build-fedora, build-macos, build-windows]
     steps:
       - name: Checkout source (pour Cargo.toml)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
           token: ${{ secrets.CANDILOG_SOURCE_TOKEN }}
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: artifacts
 
