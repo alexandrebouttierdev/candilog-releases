@@ -156,7 +156,7 @@ jobs:
             pkgconfig \
             openssl-devel \
             libxkbcommon-devel \
-            libwayland-devel \
+            wayland-devel \
             libX11-devel \
             dbus-devel \
             fontconfig-devel \
