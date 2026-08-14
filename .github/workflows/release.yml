@@ -49,6 +49,7 @@ jobs:
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
+          token: ${{ secrets.CANDILOG_SOURCE_TOKEN }}
       - uses: dtolnay/rust-toolchain@1.91.0
         with:
           components: rustfmt, clippy
@@ -81,6 +82,7 @@ jobs:
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
+          token: ${{ secrets.CANDILOG_SOURCE_TOKEN }}
       - uses: dtolnay/rust-toolchain@1.91.0
       - uses: Swatinem/rust-cache@v2
       - name: Dépendances système
@@ -149,6 +151,7 @@ jobs:
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
+          token: ${{ secrets.CANDILOG_SOURCE_TOKEN }}
       - name: Dépendances système
         run: |
           dnf install -y \
@@ -188,6 +191,7 @@ jobs:
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
+          token: ${{ secrets.CANDILOG_SOURCE_TOKEN }}
       - uses: dtolnay/rust-toolchain@1.91.0
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
@@ -253,6 +257,7 @@ jobs:
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
+          token: ${{ secrets.CANDILOG_SOURCE_TOKEN }}
       - uses: dtolnay/rust-toolchain@1.91.0
       - uses: Swatinem/rust-cache@v2
       - name: Build release
@@ -274,6 +279,7 @@ jobs:
         with:
           repository: alexandrebouttierdev/candilog
           ref: ${{ needs.resolve.outputs.ref }}
+          token: ${{ secrets.CANDILOG_SOURCE_TOKEN }}
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
