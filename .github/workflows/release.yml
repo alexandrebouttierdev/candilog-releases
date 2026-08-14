@@ -1,0 +1,340 @@
+name: Build & Release
+
+on:
+  repository_dispatch:
+    types: [release-build]
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branche ou SHA du dépôt source candilog à builder"
+        required: false
+        default: "dev"
+
+permissions:
+  contents: write
+  checks: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  resolve:
+    name: Résoudre la référence source
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - name: Référence source
+        id: resolve
+        run: |
+          REF="${{ github.event.client_payload.sha }}"
+          if [ -z "$REF" ]; then
+            REF="${{ github.event.inputs.source_ref }}"
+          fi
+          if [ -z "$REF" ]; then
+            REF="dev"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+  quality:
+    name: Qualité Linux
+    runs-on: ubuntu-latest
+    needs: resolve
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: alexandrebouttierdev/candilog
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Dépendances système
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-dev libdbus-1-dev libfontconfig1-dev
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Vérification
+        run: cargo check --locked --all-targets --all-features
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Tests
+        run: cargo test --locked --all-targets --all-features
+      - name: Doc-tests
+        run: cargo test --locked --doc --all-features
+      - name: Audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Licences, sources et avis autorisés
+        uses: EmbarkStudios/cargo-deny-action@v2
+
+  build-ubuntu:
+    name: Build Ubuntu (.deb + AppImage)
+    runs-on: ubuntu-latest
+    needs: [resolve, quality]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: alexandrebouttierdev/candilog
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Dépendances système
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libssl-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            libx11-dev \
+            libdbus-1-dev \
+            libfontconfig1-dev
+      - name: Build release
+        run: cargo build --locked --release --all-features
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+      - name: Package .deb
+        run: cargo deb --locked --no-strip
+      - name: Package .AppImage (best effort)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          curl -fsSL -o linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps AppDir/usr/lib
+          cp target/release/candilog AppDir/usr/bin/
+          cp packaging/candilog.desktop AppDir/usr/share/applications/
+          cp packaging/icons/hicolor/256x256/apps/candilog.png AppDir/usr/share/icons/hicolor/256x256/apps/
+          for lib in libEGL.so.1 libGLESv2.so.2 libxkbcommon.so.0 libfontconfig.so.1 libdbus-1.so.3 libvulkan.so.1; do
+            path=$(find /usr/lib/x86_64-linux-gnu -name "$lib" 2>/dev/null | head -1)
+            [ -n "$path" ] && cp "$path" AppDir/usr/lib/ || true
+          done
+          for lib in AppDir/usr/lib/libEGL.so.1 AppDir/usr/lib/libGLESv2.so.2 \
+                     AppDir/usr/lib/libxkbcommon.so.0 AppDir/usr/lib/libfontconfig.so.1 \
+                     AppDir/usr/lib/libdbus-1.so.3 AppDir/usr/lib/libvulkan.so.1; do
+            [ -f "$lib" ] || continue
+            ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run --appdir AppDir \
+              --deploy-deps-only "$lib"
+          done
+          ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run \
+            --appdir AppDir \
+            -d packaging/candilog.desktop \
+            -i packaging/icons/hicolor/256x256/apps/candilog.png \
+            -e AppDir/usr/bin/candilog \
+            --output appimage
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-latest
+          path: |
+            target/debian/*.deb
+            *.AppImage
+          if-no-files-found: error
+
+  build-fedora:
+    name: Build Fedora (.rpm)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    needs: [resolve, quality]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: alexandrebouttierdev/candilog
+          ref: ${{ needs.resolve.outputs.ref }}
+      - name: Dépendances système
+        run: |
+          dnf install -y \
+            rust \
+            cargo \
+            pkgconfig \
+            openssl-devel \
+            libxkbcommon-devel \
+            libwayland-devel \
+            libX11-devel \
+            dbus-devel \
+            fontconfig-devel \
+            rpm-build \
+            git
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: fedora-container
+      - name: Build release
+        run: cargo build --locked --release --all-features
+      - name: Install cargo-generate-rpm
+        run: cargo install cargo-generate-rpm --locked
+      - name: Package .rpm
+        run: cargo generate-rpm --auto-req auto
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedora-latest
+          path: target/generate-rpm/*.rpm
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS (.dmg universel)
+    runs-on: macos-latest
+    needs: [resolve, quality]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: alexandrebouttierdev/candilog
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release (aarch64)
+        run: cargo build --locked --release --all-features --target aarch64-apple-darwin
+      - name: Build release (x86_64)
+        run: cargo build --locked --release --all-features --target x86_64-apple-darwin
+      - name: Create universal binary
+        run: |
+          mkdir -p Candilog.app/Contents/MacOS
+          lipo -create \
+            target/aarch64-apple-darwin/release/candilog \
+            target/x86_64-apple-darwin/release/candilog \
+            -output Candilog.app/Contents/MacOS/candilog
+      - name: Write Info.plist
+        run: |
+          VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
+          mkdir -p Candilog.app/Contents
+          cat > Candilog.app/Contents/Info.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key>
+            <string>Candilog</string>
+            <key>CFBundleDisplayName</key>
+            <string>Candilog</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.candilog.desktop</string>
+            <key>CFBundleVersion</key>
+            <string>${VERSION}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${VERSION}</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleExecutable</key>
+            <string>candilog</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>11.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+      - name: Ad-hoc codesign
+        run: codesign --force --deep --sign - Candilog.app
+      - name: Package .dmg
+        run: hdiutil create -volname Candilog -srcfolder Candilog.app -ov -format UDZO candilog-macos-latest.dmg
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-latest
+          path: candilog-macos-latest.dmg
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (.exe)
+    runs-on: windows-latest
+    needs: [resolve, quality]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: alexandrebouttierdev/candilog
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release
+        run: cargo build --locked --release --all-features
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-latest
+          path: target/release/candilog.exe
+          if-no-files-found: error
+
+  publish:
+    name: Publier la release
+    runs-on: ubuntu-latest
+    needs: [resolve, quality, build-ubuntu, build-fedora, build-macos, build-windows]
+    steps:
+      - name: Checkout source (pour Cargo.toml)
+        uses: actions/checkout@v4
+        with:
+          repository: alexandrebouttierdev/candilog
+          ref: ${{ needs.resolve.outputs.ref }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assembler builds/
+        run: |
+          set -euo pipefail
+          APP_NAME=$(sed -n 's/^name = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
+          echo "App name: ${APP_NAME}"
+          mkdir -p builds
+          for platform in ubuntu-latest fedora-latest macos-latest windows-latest; do
+            count=0
+            for file in artifacts/${platform}/*; do
+              [ -f "$file" ] || continue
+              ext="${file##*.}"
+              cp "$file" "builds/${APP_NAME}-${platform}.${ext}"
+              count=$((count + 1))
+            done
+            if [ "$count" -eq 0 ]; then
+              echo "::error::Aucun fichier pour ${platform}, release annulée"
+              exit 1
+            fi
+            echo "${platform}: ${count} fichier(s)"
+          done
+          ls -la builds/
+
+      - name: Publier la release versionnée
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
+          TAG="v${VERSION}"
+          REPO="${GITHUB_REPOSITORY}"
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Le tag $TAG existe déjà sur $REPO : la version $VERSION est déjà publiée, aucune nouvelle release."
+            exit 0
+          fi
+
+          echo "Publication de la release $TAG (version $VERSION) sur $REPO"
+          args=()
+          for file in builds/*; do
+            [ -f "$file" ] || continue
+            base=$(basename "$file")
+            # Chaque asset est publié sous deux noms :
+            # - le nom stable `-latest` : URL immuable de la landing page
+            #   (`releases/latest/download/...`), valable tant que cette
+            #   release reste la « latest » de GitHub (tag semver) ;
+            # - le nom versionné : référence immuable de la mise à jour en
+            #   interne, retrouvé par l'application selon l'extension.
+            versionne="${base/latest/$VERSION}"
+            args+=( "$file" )
+            if [ "$base" != "$versionne" ]; then
+              cp "$file" "builds/$versionne"
+              args+=( "builds/$versionne" )
+            fi
+            echo "  asset : $base + $versionne"
+          done
+          gh release create "$TAG" "${args[@]}" --repo "$REPO" \
+            --title "Candilog $VERSION" \
+            --notes "Builds versionnés de Candilog $VERSION."
