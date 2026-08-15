@@ -98,7 +98,11 @@ jobs:
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked
       - name: Package .deb
-        run: cargo deb --locked --no-strip
+        run: |
+          cargo deb --locked --no-strip
+          # L'upload conserve l'arborescence (`target/debian/...`) ; on aplatit le .deb à la
+          # racine pour que l'étape d'assemblage le retrouve au même niveau que l'AppImage.
+          cp target/debian/*.deb .
       - name: Package .AppImage (best effort)
         continue-on-error: true
         run: |
@@ -132,7 +136,7 @@ jobs:
         with:
           name: ubuntu-latest
           path: |
-            target/debian/*.deb
+            *.deb
             *.AppImage
           if-no-files-found: error
 
